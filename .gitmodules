@@ -1,0 +1,3 @@
+[submodule "vendor/mellium_xmpp"]
+	path = vendor/mellium_xmpp
+	url = https://github.com/resonchat-org/mellium_xmpp

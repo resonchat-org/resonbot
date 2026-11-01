@@ -1,0 +1,39 @@
+# Copy to config.toml and fill in secrets.
+#   cp config.example.toml config.toml
+#   go run -mod=mod ./cmd -config config.toml
+
+[xmpp]
+jid = "bot@example.org"
+password = "secret"
+
+[room]
+jid = "room@muc.example"
+nick = "peertransbot"
+# password = ""
+priority = 3
+
+[translate]
+# deepl | openai | anthropic
+provider = "openai"
+api_key = "sk-…"
+# api_url = "https://api.openai.com/v1/chat/completions"
+model = "gpt-4o-mini"
+# One language, or several (translated in parallel per message):
+# to = "zh-CN"
+to = ["zh-CN", "ja", "en"]
+from = "auto"
+
+# DeepL free (default URL) example:
+# provider = "deepl"
+# api_key = "…"
+# api_url = "https://api-free.deepl.com/v2/translate"
+# Pro: api_url = "https://api.deepl.com/v2/translate"
+
+# Anthropic example:
+# provider = "anthropic"
+# api_key = "…"
+# model = "claude-3-5-haiku-latest"
+
+[log]
+verbose = true
+xml = false
