@@ -1,4 +1,5 @@
 // Copyright (C) 2026 ResonChat contributors.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Machine translation for peertransbot, aligned with kiss-translator's
 // public DeepL API and OpenAI / Anthropic chat shapes (prompts included).

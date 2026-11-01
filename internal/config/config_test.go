@@ -1,4 +1,5 @@
 // Copyright (C) 2026 ResonChat contributors.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package config
 
 import (
@@ -7,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestLoadDefaultsAndValidate(t *testing.T) {
+func TestLoadMultiRoomFeatures(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cfg.toml")
 	body := `
@@ -15,44 +16,23 @@ func TestLoadDefaultsAndValidate(t *testing.T) {
 jid = "bot@example.org"
 password = "secret"
 
-[room]
-jid = "room@muc.example"
+[[rooms]]
+jid = "a@muc.example"
+[[rooms]]
+jid = "b@muc.example"
 
 [translate]
-provider = "openai"
-api_key = "sk-test"
-`
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	f, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Room.Nick != "peertransbot" {
-		t.Fatalf("nick default: %q", f.Room.Nick)
-	}
-	if f.Room.Priority != 3 {
-		t.Fatalf("priority default: %d", f.Room.Priority)
-	}
-	if len(f.Translate.To) != 1 || f.Translate.To[0] != "zh-CN" || f.Translate.From != "auto" {
-		t.Fatalf("translate defaults: %+v", f.Translate)
-	}
-}
-
-func TestLoadToList(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "cfg.toml")
-	body := `
-[xmpp]
-jid = "bot@example.org"
-password = "secret"
-[room]
-jid = "room@muc.example"
-[translate]
+enabled = true
 provider = "openai"
 api_key = "sk"
-to = ["zh-CN", "ja", "en"]
+to = ["zh-CN", "ja"]
+
+[antispam]
+enabled = true
+
+[retract]
+enabled = true
+reason = "Spam"
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -61,12 +41,18 @@ to = ["zh-CN", "ja", "en"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Translate.To) != 3 {
+	if len(f.Rooms) != 2 || f.Rooms[0].Nick != "resonbot" {
+		t.Fatalf("%+v", f.Rooms)
+	}
+	if !f.Translate.Enabled || !f.Antispam.Enabled || !f.Retract.Enabled {
+		t.Fatal("feature flags")
+	}
+	if len(f.Translate.To) != 2 {
 		t.Fatalf("%v", f.Translate.To)
 	}
 }
 
-func TestLoadToSingleString(t *testing.T) {
+func TestLoadLegacyRoom(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cfg.toml")
 	body := `
@@ -75,7 +61,9 @@ jid = "bot@example.org"
 password = "secret"
 [room]
 jid = "room@muc.example"
+priority = 2
 [translate]
+enabled = true
 provider = "deepl"
 api_key = "k"
 to = "ja"
@@ -87,48 +75,26 @@ to = "ja"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Translate.To) != 1 || f.Translate.To[0] != "ja" {
-		t.Fatalf("%v", f.Translate.To)
+	if len(f.Rooms) != 1 || f.Translate.Priority != 2 || f.Translate.To[0] != "ja" {
+		t.Fatalf("%+v %+v", f.Rooms, f.Translate)
 	}
 }
 
-func TestLoadExplicitPriorityZero(t *testing.T) {
+func TestRetractNeedsAntispam(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cfg.toml")
 	body := `
 [xmpp]
 jid = "bot@example.org"
 password = "secret"
-[room]
-jid = "room@muc.example"
-priority = 0
-[translate]
-provider = "deepl"
-api_key = "k"
-`
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	f, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Room.Priority != 0 {
-		t.Fatalf("want explicit 0, got %d", f.Room.Priority)
-	}
-}
-
-func TestLoadRequiresProvider(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "cfg.toml")
-	body := `
-[xmpp]
-jid = "bot@example.org"
-password = "secret"
-[room]
+[[rooms]]
 jid = "room@muc.example"
 [translate]
+enabled = true
+provider = "openai"
 api_key = "k"
+[retract]
+enabled = true
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)

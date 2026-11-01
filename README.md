@@ -1,20 +1,13 @@
-# resonbot
+# ResonBot
 
 XMPP bots for exercising ResonChat features. Built on a local mellium fork
 (`vendor/mellium_xmpp`, `go.mod` `replace`).
 
-## peertransbot (plaintext)
+Joins one or more MUCs. Optional features (each toggled with `enabled` in TOML):
 
-Joins a MUC and, for each plaintext groupchat body from other occupants,
-publishes a [Peer Message Translation](../docs/12-peertrans.md) stanza:
-
-* destination `<body xml:lang>` + reply quote fallback (`> ` …)
-* `<x xmlns='urn:xmpp:langtrans'/>`
-* `<reply/>` to the room’s XEP-0359 `stanza-id`
-* `<peertrans priority='3'/>`
-
-No encryption (plaintext parents only). All runtime settings come from a TOML
-file (no environment variables).
+* **translate** — plaintext [Peer Message Translation](../docs/12-peertrans.md) replies
+* **antispam** — rate / repeat / nick rules → warn or ban (`affiliation=outcast`)
+* **retract** — optional XEP-0425 moderate IQ after spam (mellium `moderation`)
 
 ### Config
 
@@ -29,12 +22,12 @@ go run -mod=mod ./cmd -config config.toml
 jid = "bot@example.org"
 password = "secret"
 
-[room]
+[[rooms]]
 jid = "room@muc.example"
-nick = "peertransbot"
-priority = 3
+nick = "resonbot"
 
 [translate]
+enabled = true
 provider = "openai"          # deepl | openai | anthropic
 api_key = "sk-…"
 # api_url = "…"              # optional endpoint override
@@ -42,6 +35,13 @@ model = "gpt-4o-mini"
 # one target or a list (parallel API calls per message)
 to = ["zh-CN", "ja", "en"]
 from = "auto"
+priority = 3
+
+[antispam]
+enabled = false
+
+[retract]
+enabled = false
 
 [log]
 verbose = true

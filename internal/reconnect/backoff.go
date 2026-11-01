@@ -1,4 +1,5 @@
 // Copyright (C) 2026 ResonChat contributors.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Conversations XmppConnection.getTimeToNextAttempt (no jitter), mirrored by
 // ResonChat app/lib/xmpp/reconnect_backoff.dart.
@@ -12,11 +13,11 @@ import (
 
 // Conversations Config timers used by the connection controller.
 const (
-	ConnectTimeout     = 90 * time.Second
+	ConnectTimeout      = 90 * time.Second
 	ConnectDiscoTimeout = 20 * time.Second
-	PingMaxInterval    = 300 * time.Second
-	PingMinInterval    = 30 * time.Second
-	PingTimeout        = 15 * time.Second
+	PingMaxInterval     = 300 * time.Second
+	PingMinInterval     = 30 * time.Second
+	PingTimeout         = 15 * time.Second
 )
 
 // State mirrors Conversations Account.State for reconnect decisions.

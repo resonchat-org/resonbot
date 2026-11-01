@@ -6,33 +6,51 @@
 jid = "bot@example.org"
 password = "secret"
 
-[room]
-jid = "room@muc.example"
-nick = "peertransbot"
+[[rooms]]
+jid = "room1@muc.example"
+nick = "resonbot"
 # password = ""
-priority = 3
+
+[[rooms]]
+jid = "room2@muc.example"
+nick = "resonbot"
 
 [translate]
-# deepl | openai | anthropic
-provider = "openai"
+enabled = true
+provider = "openai"          # deepl | openai | anthropic
 api_key = "sk-…"
 # api_url = "https://api.openai.com/v1/chat/completions"
 model = "gpt-4o-mini"
-# One language, or several (translated in parallel per message):
-# to = "zh-CN"
 to = ["zh-CN", "ja", "en"]
 from = "auto"
+priority = 3
+# rooms = ["room1@muc.example"]   # empty = all joined rooms
 
-# DeepL free (default URL) example:
-# provider = "deepl"
-# api_key = "…"
-# api_url = "https://api-free.deepl.com/v2/translate"
-# Pro: api_url = "https://api.deepl.com/v2/translate"
+[antispam]
+enabled = true
+# rooms = []
+max_freq_count = 3
+send_interval = 0.6
+max_typing_speed = 8
+max_repeat_count = 3
+min_edit_speed = 0.6
+repeat_ratio = 20
+reset_limit = 60
+ban_nicks = ["Spammer"]
+announce_ban = true
+ban_all_rooms = true
+clean_cache = 3600
 
-# Anthropic example:
-# provider = "anthropic"
-# api_key = "…"
-# model = "claude-3-5-haiku-latest"
+[antispam.replies]
+too_fast_warning = "%v: Please stop sending lots of messages quickly"
+repeat_warning = "%v: Please stop sending repetitive messages"
+ban_log = "Spammer %v expelled, whose JID is %v"
+
+# XEP-0425 via mellium moderation (ResonChat / Conversations IQ shape).
+# Requires antispam.enabled.
+[retract]
+enabled = true
+reason = "Spam"
 
 [log]
 verbose = true

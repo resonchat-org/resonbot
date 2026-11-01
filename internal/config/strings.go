@@ -1,4 +1,5 @@
 // Copyright (C) 2026 ResonChat contributors.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package config
 
 import (
@@ -6,12 +7,11 @@ import (
 	"strings"
 )
 
-// LangList accepts either a single TOML string or an array of strings for
-// translate.to (multi-target languages).
-type LangList []string
+// StringList accepts a single TOML string or an array of strings.
+type StringList []string
 
 // UnmarshalTOML implements github.com/BurntSushi/toml.Unmarshaler.
-func (l *LangList) UnmarshalTOML(data interface{}) error {
+func (l *StringList) UnmarshalTOML(data interface{}) error {
 	switch v := data.(type) {
 	case nil:
 		*l = nil
@@ -22,14 +22,14 @@ func (l *LangList) UnmarshalTOML(data interface{}) error {
 			*l = nil
 			return nil
 		}
-		*l = LangList{s}
+		*l = StringList{s}
 		return nil
 	case []interface{}:
-		out := make(LangList, 0, len(v))
+		out := make(StringList, 0, len(v))
 		for i, item := range v {
 			s, ok := item.(string)
 			if !ok {
-				return fmt.Errorf("translate.to[%d]: want string, got %T", i, item)
+				return fmt.Errorf("want string, got %T at index %d", item, i)
 			}
 			s = strings.TrimSpace(s)
 			if s == "" {
@@ -40,6 +40,9 @@ func (l *LangList) UnmarshalTOML(data interface{}) error {
 		*l = out
 		return nil
 	default:
-		return fmt.Errorf("translate.to: want string or array of strings, got %T", data)
+		return fmt.Errorf("want string or array of strings, got %T", data)
 	}
 }
+
+// LangList is an alias kept for translate.to clarity.
+type LangList = StringList

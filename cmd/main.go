@@ -1,10 +1,8 @@
 // Copyright (C) 2026 ResonChat contributors.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// peertransbot joins a MUC and publishes plaintext Peer Message Translation
-// (urn:resonchat:peertrans:0) replies for testing ResonChat merge.
-//
-// Reconnect / Stream Management follow Conversations (and ResonChat):
-// getTimeToNextAttempt backoff, IQ ping or SM <r/>, XEP-0198 enable+resume.
+// resonbot joins one or more MUCs and optionally translates / anti-spams.
+// Reconnect / Stream Management follow Conversations.
 //
 //	go run -mod=mod ./cmd -config config.toml
 package main
@@ -22,9 +20,10 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/resonchat-org/resonbot/internal/antispam"
+	"github.com/resonchat-org/resonbot/internal/bot"
 	"github.com/resonchat-org/resonbot/internal/config"
 	"github.com/resonchat-org/resonbot/internal/peertrans"
 	"github.com/resonchat-org/resonbot/internal/reconnect"
@@ -61,8 +60,8 @@ func main() {
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), `Usage: %s -config config.toml
 
-All settings are read from TOML (see config.example.toml). No environment
-variables are used for account, room, or translation options.
+All settings come from TOML (see config.example.toml). Enable features with
+translate.enabled / antispam.enabled / retract.enabled.
 
 `, flags.Name())
 		flags.PrintDefaults()
@@ -94,68 +93,81 @@ variables are used for account, room, or translation options.
 	if err != nil {
 		logger.Fatalf("xmpp.jid: %v", err)
 	}
-	roomBare, err := jid.Parse(file.Room.JID)
-	if err != nil {
-		logger.Fatalf("room.jid: %v", err)
-	}
-	roomBare = roomBare.Bare()
-	roomFull, err := roomBare.WithResource(file.Room.Nick)
-	if err != nil {
-		logger.Fatalf("room.nick: %v", err)
+
+	rooms := make([]bot.Room, 0, len(file.Rooms))
+	for i, rc := range file.Rooms {
+		bare, err := jid.Parse(rc.JID)
+		if err != nil {
+			logger.Fatalf("rooms[%d].jid: %v", i, err)
+		}
+		bare = bare.Bare()
+		full, err := bare.WithResource(rc.Nick)
+		if err != nil {
+			logger.Fatalf("rooms[%d].nick: %v", i, err)
+		}
+		rooms = append(rooms, bot.Room{
+			Bare:     bare,
+			Full:     full,
+			Nick:     rc.Nick,
+			Password: rc.Password,
+		})
 	}
 
-	tr, err := translate.New(translate.Config{
-		Provider: file.Translate.Provider,
-		APIKey:   file.Translate.APIKey,
-		APIURL:   file.Translate.APIURL,
-		Model:    file.Translate.Model,
-		FromLang: file.Translate.From,
-	})
-	if err != nil {
-		logger.Fatal(err)
+	opt := bot.Options{Rooms: rooms, Retract: file.Retract}
+	features := []string{}
+	if file.Translate.Enabled {
+		tr, err := translate.New(translate.Config{
+			Provider: file.Translate.Provider,
+			APIKey:   file.Translate.APIKey,
+			APIURL:   file.Translate.APIURL,
+			Model:    file.Translate.Model,
+			FromLang: file.Translate.From,
+		})
+		if err != nil {
+			logger.Fatal(err)
+		}
+		tc := file.Translate
+		opt.Translate = &tc
+		opt.Translator = tr
+		features = append(features, "translate")
 	}
-	logger.Printf("config=%s translator=%s to=%v from=%s", configPath, tr.Name(), []string(file.Translate.To), file.Translate.From)
+	if file.Antispam.Enabled {
+		opt.Antispam = antispam.New(file.Antispam)
+		features = append(features, "antispam")
+	}
+	if file.Retract.Enabled {
+		features = append(features, "retract")
+	}
+	logger.Printf("config=%s rooms=%d features=%v", configPath, len(rooms), features)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	cfg := botConfig{
-		addr:       parsedAddr,
-		pass:       file.XMPP.Password,
-		roomBare:   roomBare,
-		roomFull:   roomFull,
-		roomPass:   file.Room.Password,
-		priority:   file.Room.Priority,
-		translator: tr,
-		toLangs:    append([]string(nil), file.Translate.To...),
-		fromLang:   file.Translate.From,
-		xmlIn:      xmlIn,
-		xmlOut:     xmlOut,
-		logger:     logger,
-		debug:      debug,
+	cfg := appConfig{
+		addr:   parsedAddr,
+		pass:   file.XMPP.Password,
+		opt:    opt,
+		xmlIn:  xmlIn,
+		xmlOut: xmlOut,
+		logger: logger,
+		debug:  debug,
 	}
 	if err := runLoop(ctx, cfg); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Fatal(err)
 	}
 }
 
-type botConfig struct {
-	addr       jid.JID
-	pass       string
-	roomBare   jid.JID
-	roomFull   jid.JID
-	roomPass   string
-	priority   int
-	translator translate.Translator
-	toLangs    []string
-	fromLang   string
-	xmlIn      io.Writer
-	xmlOut     io.Writer
-	logger     *log.Logger
-	debug      *log.Logger
+type appConfig struct {
+	addr   jid.JID
+	pass   string
+	opt    bot.Options
+	xmlIn  io.Writer
+	xmlOut io.Writer
+	logger *log.Logger
+	debug  *log.Logger
 }
 
-func runLoop(ctx context.Context, cfg botConfig) error {
+func runLoop(ctx context.Context, cfg appConfig) error {
 	smHandler := &sm.Handler{}
 	var (
 		attempt      int
@@ -210,8 +222,6 @@ func runLoop(ctx context.Context, cfg botConfig) error {
 			}
 			state = next
 			attempt++
-			// Conversations resets the connection clock on timeout so backoff
-			// does not subtract the whole CONNECT_TIMEOUT.
 			if next == reconnect.StateConnectionTimeout {
 				connectStart = time.Now()
 			}
@@ -234,13 +244,13 @@ func runLoop(ctx context.Context, cfg botConfig) error {
 		cfg.logger.Printf("connection lost: %v", lost)
 		state = reconnect.StateOffline
 		attempt++
-		connectStart = time.Time{} // immediate offline reconnect
+		connectStart = time.Time{}
 	}
 }
 
 func dialSession(
 	ctx context.Context,
-	cfg botConfig,
+	cfg appConfig,
 	smHandler *sm.Handler,
 	server string,
 ) (*xmpp.Session, *muc.Client, error) {
@@ -341,33 +351,26 @@ func classifyDialError(err error) (reconnect.State, string) {
 
 func runSession(
 	ctx context.Context,
-	cfg botConfig,
+	cfg appConfig,
 	sess *xmpp.Session,
 	mucClient *muc.Client,
 	smHandler *sm.Handler,
 ) error {
+	rt := bot.New(ctx, sess, mucClient, smHandler, cfg.opt, cfg.logger, cfg.debug)
 	stanzaMux := mux.New(stanza.NSClient, muc.HandleClient(mucClient), ping.Handle())
-	b := &bot{
-		session:    sess,
-		sm:         smHandler,
-		roomBare:   cfg.roomBare,
-		nick:       cfg.roomFull.Resourcepart(),
-		priority:   cfg.priority,
-		translator: cfg.translator,
-		toLangs:    cfg.toLangs,
-		fromLang:   cfg.fromLang,
-		logger:     cfg.logger,
-		debug:      cfg.debug,
-		onPacket:   nil, // set below
-	}
 
 	var lastPacket time.Time
 	notePacket := func() { lastPacket = time.Now() }
-	b.onPacket = notePacket
 
 	serveErr := make(chan error, 1)
 	go func() {
 		serveErr <- sess.Serve(smHandler.Wrap(xmpp.HandlerFunc(func(t xmlstream.TokenReadEncoder, start *xml.StartElement) error {
+			// Application errors must not kill the stream; only I/O failures should.
+			defer func() {
+				if rec := recover(); rec != nil {
+					cfg.logger.Printf("panic in serve handler: %v", rec)
+				}
+			}()
 			notePacket()
 			if start.Name.Local == "message" {
 				d := xml.NewTokenDecoder(xmlstream.MultiReader(xmlstream.Token(*start), t))
@@ -379,24 +382,24 @@ func runSession(
 					cfg.logger.Printf("decode message: %v", err)
 					return nil
 				}
-				return b.handle(in)
+				_ = rt.HandleIncoming(in) // always nil; never tear down Serve
+				return nil
 			}
-			return stanzaMux.HandleXMPP(t, start)
+			if err := stanzaMux.HandleXMPP(t, start); err != nil {
+				cfg.logger.Printf("stanza handler: %v", err)
+				return nil
+			}
+			return nil
 		})))
 	}()
 
 	joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer joinCancel()
-	opts := []muc.Option{muc.MaxBytes(0)}
-	if cfg.roomPass != "" {
-		opts = append(opts, muc.Password(cfg.roomPass))
-	}
-	cfg.logger.Printf("joining %s as %s…", cfg.roomBare, cfg.roomFull.Resourcepart())
-	if _, err := mucClient.Join(joinCtx, cfg.roomFull, sess, opts...); err != nil {
-		return fmt.Errorf("join: %w", err)
+	if err := rt.JoinAll(joinCtx); err != nil {
+		return err
 	}
 	notePacket()
-	cfg.logger.Printf("joined; translating plaintext groupchat messages")
+	cfg.logger.Printf("joined %d room(s)", len(cfg.opt.Rooms))
 
 	var lastPing time.Time
 	ticker := time.NewTicker(time.Second)
@@ -412,8 +415,6 @@ func runSession(
 			}
 			return err
 		case now := <-ticker.C:
-			// SM <a/> updates LastAck on the serve goroutine; treat it as
-			// packet activity (Conversations lastPacketReceived).
 			if smHandler.Enabled() {
 				if ack := smHandler.LastAck(); !ack.IsZero() && ack.After(lastPacket) {
 					lastPacket = ack
@@ -458,107 +459,4 @@ func runSession(
 			}
 		}
 	}
-}
-
-type bot struct {
-	session    *xmpp.Session
-	sm         *sm.Handler
-	roomBare   jid.JID
-	nick       string
-	priority   int
-	translator translate.Translator
-	toLangs    []string
-	fromLang   string
-	logger     *log.Logger
-	debug      *log.Logger
-	onPacket   func()
-}
-
-func (b *bot) handle(in peertrans.Incoming) error {
-	if b.onPacket != nil {
-		b.onPacket()
-	}
-	if in.Type != stanza.GroupChatMessage {
-		return nil
-	}
-	body := strings.TrimSpace(in.Body)
-	if body == "" {
-		return nil
-	}
-	if !in.From.Bare().Equal(b.roomBare) {
-		return nil
-	}
-	if in.From.Resourcepart() == b.nick {
-		return nil
-	}
-	if in.PeerTrans != nil {
-		return nil
-	}
-	parentID := in.ParentID(b.roomBare)
-	if parentID == "" {
-		b.debug.Printf("skip message without usable id from %s", in.From)
-		return nil
-	}
-
-	trCtx, trCancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer trCancel()
-
-	type langHit struct {
-		toLang string
-		res    translate.Result
-		err    error
-	}
-	hits := make([]langHit, len(b.toLangs))
-	var wg sync.WaitGroup
-	for i, toLang := range b.toLangs {
-		wg.Add(1)
-		go func(i int, toLang string) {
-			defer wg.Done()
-			res, err := b.translator.Translate(trCtx, body, b.fromLang, toLang)
-			hits[i] = langHit{toLang: toLang, res: res, err: err}
-		}(i, toLang)
-	}
-	wg.Wait()
-
-	// Encode peertrans one at a time; mellium session is not concurrent-safe.
-	for _, hit := range hits {
-		if hit.err != nil {
-			b.logger.Printf("translate → %s: %v", hit.toLang, hit.err)
-			continue
-		}
-		res := hit.res
-		src := res.SourceLang
-		if src == "" {
-			src = b.fromLang
-		}
-		if translate.SameLanguage(src, hit.toLang) || translate.SameLanguage(src, res.DestLang) {
-			b.debug.Printf("skip %s: source already %s", hit.toLang, src)
-			continue
-		}
-		originID := fmt.Sprintf("pt-%d", time.Now().UnixNano())
-		out := peertrans.NewOutgoing(
-			b.roomBare,
-			in,
-			res.DestLang,
-			res.SourceLang,
-			res.Text,
-			res.Engine,
-			b.priority,
-			originID,
-		)
-		b.logger.Printf("peertrans %q → %q (%s engine=%s parent=%s from=%s)",
-			body, res.Text, res.DestLang, res.Engine, parentID, in.From)
-		sendCtx, sendCancel := context.WithTimeout(context.Background(), 15*time.Second)
-		var err error
-		if b.sm != nil && b.sm.Enabled() {
-			err = b.sm.Encode(sendCtx, b.session, out)
-		} else {
-			err = b.session.Encode(sendCtx, out)
-		}
-		sendCancel()
-		if err != nil {
-			b.logger.Printf("send peertrans (%s): %v", res.DestLang, err)
-		}
-	}
-	return nil
 }

@@ -1,0 +1,4 @@
+/bin/
+*.exe
+/peertransbot
+/config.toml
